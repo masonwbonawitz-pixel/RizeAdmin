@@ -367,14 +367,14 @@ export default function AdminView() {
                           hour12: true,
                         });
                         
-                        // Construct URLs for files in temp bucket using Supabase storage
-                        const supabase = getSupabaseClient();
+                        // Construct URLs for files in temp bucket - use direct Supabase storage URL format
+                        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://bfgbukjtxmxufgocqfjf.supabase.co';
                         const bucketName = 'objs';
                         const imageUrl = order.fileId 
-                          ? supabase.storage.from(bucketName).getPublicUrl(`temp/${order.fileId}_preview.png`).data.publicUrl
+                          ? `${supabaseUrl}/storage/v1/object/public/${bucketName}/temp/${order.fileId}_preview.png`
                           : null;
                         const objUrl = order.fileId 
-                          ? supabase.storage.from(bucketName).getPublicUrl(`temp/${order.fileId}.obj`).data.publicUrl
+                          ? `${supabaseUrl}/storage/v1/object/public/${bucketName}/temp/${order.fileId}.obj`
                           : null;
                         
                         return (
