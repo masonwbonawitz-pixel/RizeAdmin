@@ -559,7 +559,7 @@ export default function AdminView() {
                         const status = orderStatuses[order.id] || { printed: false, shipped: false };
                         
                         return (
-                          <tr key={order.id} style={{ borderBottom: '1px solid #eee', background: status.shipped ? '#fff3cd' : 'white' }}>
+                          <tr key={order.id} style={{ borderBottom: '1px solid #eee', background: status.shipped ? '#e3f2fd' : 'white' }}>
                             <td style={{ padding: '12px' }}></td>
                             <td style={{ padding: '12px', textAlign: 'center' }}>
                               <input
