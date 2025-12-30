@@ -184,6 +184,49 @@ export default function AdminView() {
     setSelectedShippedOrders(new Set());
   };
 
+  const markSelectedAsUnshipped = () => {
+    if (selectedShippedOrders.size === 0) {
+      setStatusMessage({ type: 'error', text: 'No orders selected to mark as unshipped' });
+      return;
+    }
+
+    // Get the orders to move back
+    const ordersToUnship = shippedOrders.filter(order => selectedShippedOrders.has(order.id));
+    
+    // Move them back to orders
+    setOrders(prev => {
+      const updated = [...prev, ...ordersToUnship];
+      return updated;
+    });
+    
+    // Remove from shipped orders
+    setShippedOrders(prev => {
+      const updated = prev.filter(order => !selectedShippedOrders.has(order.id));
+      localStorage.setItem('shippedOrders', JSON.stringify(updated));
+      return updated;
+    });
+
+    // Clear their shipped status in orderStatuses
+    setOrderStatuses(prev => {
+      const updated = { ...prev };
+      ordersToUnship.forEach(order => {
+        if (updated[order.id]) {
+          updated[order.id] = {
+            ...updated[order.id],
+            shipped: false,
+          };
+        } else {
+          updated[order.id] = { printed: false, shipped: false };
+        }
+      });
+      localStorage.setItem('orderStatuses', JSON.stringify(updated));
+      return updated;
+    });
+    
+    setStatusMessage({ type: 'success', text: `${selectedShippedOrders.size} order(s) marked as unshipped` });
+    setSelectedShippedOrders(new Set());
+  };
+
   const sanitizeFilename = (name: string) => {
     return name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
   };
