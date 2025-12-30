@@ -122,9 +122,9 @@ export default function AdminView() {
         }));
         console.log('📦 Mapped orders:', mappedOrders);
         
-        // Load deleted orders from localStorage
+        // Load deleted orders from localStorage (use state if available, otherwise read from localStorage)
         const savedDeleted = localStorage.getItem('deletedOrders');
-        const currentDeleted = savedDeleted ? new Set<string>(JSON.parse(savedDeleted)) : deletedOrders;
+        const currentDeleted: Set<string> = savedDeleted ? new Set<string>(JSON.parse(savedDeleted)) : (deletedOrders.size > 0 ? deletedOrders : new Set());
         
         // Filter out orders that are already in printed, shipped, or deleted
         const printedOrderIds = new Set(currentPrinted.map((o: Order) => o.id));
