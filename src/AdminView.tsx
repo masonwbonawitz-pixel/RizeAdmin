@@ -165,8 +165,6 @@ export default function AdminView() {
       localStorage.setItem('orderStatuses', JSON.stringify(updated));
       return updated;
     });
-    
-    setStatusMessage({ type: 'success', text: `${ordersToPrint.length} order(s) moved to printed` });
   };
 
   const confirmShipOrders = () => {
@@ -191,8 +189,6 @@ export default function AdminView() {
       localStorage.setItem('orderStatuses', JSON.stringify(updated));
       return updated;
     });
-    
-    setStatusMessage({ type: 'success', text: `${ordersToShip.length} order(s) moved to shipped` });
   };
 
   const handleSelectPrintedOrder = (orderId: string, selected: boolean) => {
@@ -310,46 +306,43 @@ export default function AdminView() {
     setSelectedPrintedOrders(new Set());
   };
 
-  const markSelectedAsUnshipped = () => {
+  const markShippedAsPrinted = () => {
     if (selectedShippedOrders.size === 0) {
-      setStatusMessage({ type: 'error', text: 'No orders selected to mark as unshipped' });
+      setStatusMessage({ type: 'error', text: 'No orders selected' });
       return;
     }
 
-    // Get the orders to move back
-    const ordersToUnship = shippedOrders.filter(order => selectedShippedOrders.has(order.id));
+    const ordersToMove = shippedOrders.filter(order => selectedShippedOrders.has(order.id));
     
-    // Move them back to orders
-    setOrders(prev => {
-      const updated = [...prev, ...ordersToUnship];
+    setPrintedOrders(prev => {
+      const updated = [...prev, ...ordersToMove];
+      localStorage.setItem('printedOrders', JSON.stringify(updated));
       return updated;
     });
     
-    // Remove from shipped orders
     setShippedOrders(prev => {
       const updated = prev.filter(order => !selectedShippedOrders.has(order.id));
       localStorage.setItem('shippedOrders', JSON.stringify(updated));
       return updated;
     });
 
-    // Clear their shipped status in orderStatuses
     setOrderStatuses(prev => {
       const updated = { ...prev };
-      ordersToUnship.forEach(order => {
+      ordersToMove.forEach(order => {
         if (updated[order.id]) {
           updated[order.id] = {
             ...updated[order.id],
+            printed: true,
             shipped: false,
           };
         } else {
-          updated[order.id] = { printed: false, shipped: false };
+          updated[order.id] = { printed: true, shipped: false };
         }
       });
       localStorage.setItem('orderStatuses', JSON.stringify(updated));
       return updated;
     });
     
-    setStatusMessage({ type: 'success', text: `${selectedShippedOrders.size} order(s) marked as unshipped` });
     setSelectedShippedOrders(new Set());
   };
 
@@ -373,7 +366,7 @@ export default function AdminView() {
               cursor: 'pointer',
             }}
           >
-            Orders
+            Orders ({orders.length})
           </button>
           <button
             onClick={() => setActiveTab('printed')}
@@ -447,14 +440,14 @@ export default function AdminView() {
                     <thead>
                       <tr style={{ borderBottom: '2px solid #ddd', background: '#f5f5f5' }}>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold', width: '30px' }}></th>
+                        <th style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold', width: '80px' }}>Printed</th>
+                        <th style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold', width: '80px' }}>Shipped</th>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Name</th>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Date and Time</th>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Size</th>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Image</th>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Download</th>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Order ID</th>
-                        <th style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold', width: '80px' }}>Printed</th>
-                        <th style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold', width: '80px' }}>Shipped</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -495,6 +488,22 @@ export default function AdminView() {
                         return (
                           <tr key={order.id} style={{ borderBottom: '1px solid #eee', background: status.shipped ? '#fff3cd' : 'white' }}>
                             <td style={{ padding: '12px' }}></td>
+                            <td style={{ padding: '12px', textAlign: 'center' }}>
+                              <input
+                                type="checkbox"
+                                checked={status.printed}
+                                onChange={(e) => handleStatusChange(order.id, 'printed', e.target.checked)}
+                                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                              />
+                            </td>
+                            <td style={{ padding: '12px', textAlign: 'center' }}>
+                              <input
+                                type="checkbox"
+                                checked={status.shipped}
+                                onChange={(e) => handleStatusChange(order.id, 'shipped', e.target.checked)}
+                                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                              />
+                            </td>
                             <td style={{ padding: '12px' }}>{order.customerName}</td>
                             <td style={{ padding: '12px' }}>{formattedDate}</td>
                             <td style={{ padding: '12px' }}>{order.gridSize ? `${order.gridSize}×${order.gridSize}` : '-'}</td>
@@ -539,22 +548,6 @@ export default function AdminView() {
                             </td>
                             <td style={{ padding: '12px' }}>
                               {order.shopifyOrderName || order.orderId}
-                            </td>
-                            <td style={{ padding: '12px', textAlign: 'center' }}>
-                              <input
-                                type="checkbox"
-                                checked={status.printed}
-                                onChange={(e) => handleStatusChange(order.id, 'printed', e.target.checked)}
-                                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                              />
-                            </td>
-                            <td style={{ padding: '12px', textAlign: 'center' }}>
-                              <input
-                                type="checkbox"
-                                checked={status.shipped}
-                                onChange={(e) => handleStatusChange(order.id, 'shipped', e.target.checked)}
-                                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                              />
                             </td>
                           </tr>
                         );
@@ -715,8 +708,8 @@ export default function AdminView() {
                     {selectedShippedOrders.size === shippedOrders.length && shippedOrders.length > 0 ? 'Deselect All' : 'Select All'}
                   </Button>
                   {selectedShippedOrders.size > 0 && (
-                    <Button onClick={markSelectedAsUnshipped} tone="success">
-                      Mark as Unshipped ({String(selectedShippedOrders.size)})
+                    <Button onClick={markShippedAsPrinted} tone="success">
+                      Mark as Printed ({String(selectedShippedOrders.size)})
                     </Button>
                   )}
                   <Button onClick={deleteSelectedShippedOrders} tone="critical" disabled={selectedShippedOrders.size === 0}>
