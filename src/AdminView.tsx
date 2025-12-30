@@ -263,32 +263,28 @@ export default function AdminView() {
     setSelectedPrintedOrders(new Set());
   };
 
-  const markSelectedAsUnprinted = () => {
+  const sendPrintedToOrders = () => {
     if (selectedPrintedOrders.size === 0) {
-      setStatusMessage({ type: 'error', text: 'No orders selected to mark as unprinted' });
+      setStatusMessage({ type: 'error', text: 'No orders selected' });
       return;
     }
 
-    // Get the orders to move back
-    const ordersToUnprint = printedOrders.filter(order => selectedPrintedOrders.has(order.id));
+    const ordersToMove = printedOrders.filter(order => selectedPrintedOrders.has(order.id));
     
-    // Move them back to orders
     setOrders(prev => {
-      const updated = [...prev, ...ordersToUnprint];
+      const updated = [...prev, ...ordersToMove];
       return updated;
     });
     
-    // Remove from printed orders
     setPrintedOrders(prev => {
       const updated = prev.filter(order => !selectedPrintedOrders.has(order.id));
       localStorage.setItem('printedOrders', JSON.stringify(updated));
       return updated;
     });
 
-    // Clear their printed status in orderStatuses
     setOrderStatuses(prev => {
       const updated = { ...prev };
-      ordersToUnprint.forEach(order => {
+      ordersToMove.forEach(order => {
         if (updated[order.id]) {
           updated[order.id] = {
             ...updated[order.id],
@@ -302,7 +298,46 @@ export default function AdminView() {
       return updated;
     });
     
-    setStatusMessage({ type: 'success', text: `${selectedPrintedOrders.size} order(s) marked as unprinted` });
+    setSelectedPrintedOrders(new Set());
+  };
+
+  const markPrintedAsShipped = () => {
+    if (selectedPrintedOrders.size === 0) {
+      setStatusMessage({ type: 'error', text: 'No orders selected' });
+      return;
+    }
+
+    const ordersToMove = printedOrders.filter(order => selectedPrintedOrders.has(order.id));
+    
+    setShippedOrders(prev => {
+      const updated = [...prev, ...ordersToMove];
+      localStorage.setItem('shippedOrders', JSON.stringify(updated));
+      return updated;
+    });
+    
+    setPrintedOrders(prev => {
+      const updated = prev.filter(order => !selectedPrintedOrders.has(order.id));
+      localStorage.setItem('printedOrders', JSON.stringify(updated));
+      return updated;
+    });
+
+    setOrderStatuses(prev => {
+      const updated = { ...prev };
+      ordersToMove.forEach(order => {
+        if (updated[order.id]) {
+          updated[order.id] = {
+            ...updated[order.id],
+            printed: false,
+            shipped: true,
+          };
+        } else {
+          updated[order.id] = { printed: false, shipped: true };
+        }
+      });
+      localStorage.setItem('orderStatuses', JSON.stringify(updated));
+      return updated;
+    });
+    
     setSelectedPrintedOrders(new Set());
   };
 
@@ -571,9 +606,14 @@ export default function AdminView() {
                     {selectedPrintedOrders.size === printedOrders.length && printedOrders.length > 0 ? 'Deselect All' : 'Select All'}
                   </Button>
                   {selectedPrintedOrders.size > 0 && (
-                    <Button onClick={markSelectedAsUnprinted} tone="success">
-                      Mark as Unprinted ({String(selectedPrintedOrders.size)})
-                    </Button>
+                    <>
+                      <Button onClick={sendPrintedToOrders} tone="success">
+                        Send to Orders ({String(selectedPrintedOrders.size)})
+                      </Button>
+                      <Button onClick={markPrintedAsShipped} tone="success">
+                        Mark as Shipped ({String(selectedPrintedOrders.size)})
+                      </Button>
+                    </>
                   )}
                   <Button onClick={deleteSelectedPrintedOrders} tone="critical" disabled={selectedPrintedOrders.size === 0}>
                     Delete Selected ({String(selectedPrintedOrders.size)})
