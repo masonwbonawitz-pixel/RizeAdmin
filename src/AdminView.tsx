@@ -64,7 +64,17 @@ export default function AdminView() {
       const supabase = getSupabaseClient();
       console.log('🔍 Loading orders from jobs table...');
       
-      // Load shipped orders from localStorage to filter them out
+      // Load printed and shipped orders from localStorage to filter them out
+      const savedPrinted = localStorage.getItem('printedOrders');
+      let currentPrinted: Order[] = [];
+      if (savedPrinted) {
+        try {
+          currentPrinted = JSON.parse(savedPrinted);
+          setPrintedOrders(currentPrinted);
+        } catch (e) {
+          console.error('Error loading printed orders:', e);
+        }
+      }
       const savedShipped = localStorage.getItem('shippedOrders');
       let currentShipped: Order[] = [];
       if (savedShipped) {
@@ -105,8 +115,7 @@ export default function AdminView() {
         // Filter out orders that are already in printed or shipped orders
         const printedOrderIds = new Set(currentPrinted.map((o: Order) => o.id));
         const shippedOrderIds = new Set(currentShipped.map((o: Order) => o.id));
-        const allFilteredIds = new Set([...printedOrderIds, ...shippedOrderIds]);
-        const activeOrders = mappedOrders.filter(order => !allFilteredIds.has(order.id));
+        const activeOrders = mappedOrders.filter(order => !printedOrderIds.has(order.id) && !shippedOrderIds.has(order.id));
         setOrders(activeOrders);
       }
     } catch (error) {
@@ -412,6 +421,11 @@ export default function AdminView() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <h2>Orders</h2>
                 <div style={{ display: 'flex', gap: '10px' }}>
+                  {orders.filter(o => orderStatuses[o.id]?.printed).length > 0 && (
+                    <Button onClick={confirmPrintOrders} tone="success">
+                      Confirm Print ({String(orders.filter(o => orderStatuses[o.id]?.printed).length)})
+                    </Button>
+                  )}
                   {orders.filter(o => orderStatuses[o.id]?.shipped).length > 0 && (
                     <Button onClick={confirmShipOrders} tone="success">
                       Confirm Ship ({String(orders.filter(o => orderStatuses[o.id]?.shipped).length)})
