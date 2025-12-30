@@ -20,8 +20,10 @@ export default function AdminView() {
   const [shippedOrders, setShippedOrders] = useState<Order[]>([]);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
   const [orderStatuses, setOrderStatuses] = useState<Record<string, { printed: boolean; shipped: boolean }>>({});
+  const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
   const [selectedPrintedOrders, setSelectedPrintedOrders] = useState<Set<string>>(new Set());
   const [selectedShippedOrders, setSelectedShippedOrders] = useState<Set<string>>(new Set());
+  const [deletedOrders, setDeletedOrders] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (activeTab === 'orders') {
@@ -53,6 +55,14 @@ export default function AdminView() {
         setOrderStatuses(JSON.parse(savedStatuses));
       } catch (e) {
         console.error('Error loading order statuses:', e);
+      }
+    }
+    const savedDeleted = localStorage.getItem('deletedOrders');
+    if (savedDeleted) {
+      try {
+        setDeletedOrders(new Set(JSON.parse(savedDeleted)));
+      } catch (e) {
+        console.error('Error loading deleted orders:', e);
       }
     }
   }, []);
@@ -112,10 +122,18 @@ export default function AdminView() {
         }));
         console.log('📦 Mapped orders:', mappedOrders);
         
-        // Filter out orders that are already in printed or shipped orders
+        // Load deleted orders from localStorage
+        const savedDeleted = localStorage.getItem('deletedOrders');
+        const currentDeleted = savedDeleted ? new Set(JSON.parse(savedDeleted)) : new Set<string>();
+        
+        // Filter out orders that are already in printed, shipped, or deleted
         const printedOrderIds = new Set(currentPrinted.map((o: Order) => o.id));
         const shippedOrderIds = new Set(currentShipped.map((o: Order) => o.id));
-        const activeOrders = mappedOrders.filter(order => !printedOrderIds.has(order.id) && !shippedOrderIds.has(order.id));
+        const activeOrders = mappedOrders.filter(order => 
+          !printedOrderIds.has(order.id) && 
+          !shippedOrderIds.has(order.id) && 
+          !currentDeleted.has(order.id)
+        );
         setOrders(activeOrders);
       }
     } catch (error) {
@@ -191,6 +209,66 @@ export default function AdminView() {
     });
   };
 
+  const handleSelectOrder = (orderId: string, selected: boolean) => {
+    setSelectedOrders(prev => {
+      const updated = new Set(prev);
+      if (selected) {
+        updated.add(orderId);
+      } else {
+        updated.delete(orderId);
+      }
+      return updated;
+    });
+  };
+
+  const handleSelectAllOrders = (selectAll: boolean) => {
+    if (selectAll) {
+      setSelectedOrders(new Set(orders.map(o => o.id)));
+    } else {
+      setSelectedOrders(new Set());
+    }
+  };
+
+  const markSelectedOrdersAsPrinted = () => {
+    if (selectedOrders.size === 0) {
+      setStatusMessage({ type: 'error', text: 'No orders selected' });
+      return;
+    }
+
+    const ordersToMark = orders.filter(order => selectedOrders.has(order.id));
+    
+    setOrderStatuses(prev => {
+      const updated = { ...prev };
+      ordersToMark.forEach(order => {
+        updated[order.id] = {
+          ...prev[order.id],
+          printed: true,
+        };
+      });
+      localStorage.setItem('orderStatuses', JSON.stringify(updated));
+      return updated;
+    });
+    
+    setSelectedOrders(new Set());
+  };
+
+  const deleteSelectedOrders = () => {
+    if (selectedOrders.size === 0) {
+      setStatusMessage({ type: 'error', text: 'No orders selected to delete' });
+      return;
+    }
+    
+    setDeletedOrders(prev => {
+      const updated = new Set(prev);
+      selectedOrders.forEach(id => updated.add(id));
+      localStorage.setItem('deletedOrders', JSON.stringify(Array.from(updated)));
+      return updated;
+    });
+    
+    setOrders(prev => prev.filter(order => !selectedOrders.has(order.id)));
+    setSelectedOrders(new Set());
+  };
+
   const handleSelectPrintedOrder = (orderId: string, selected: boolean) => {
     setSelectedPrintedOrders(prev => {
       const updated = new Set(prev);
@@ -237,13 +315,19 @@ export default function AdminView() {
       return;
     }
     
+    setDeletedOrders(prev => {
+      const updated = new Set(prev);
+      selectedShippedOrders.forEach(id => updated.add(id));
+      localStorage.setItem('deletedOrders', JSON.stringify(Array.from(updated)));
+      return updated;
+    });
+    
     setShippedOrders(prev => {
       const updated = prev.filter(order => !selectedShippedOrders.has(order.id));
       localStorage.setItem('shippedOrders', JSON.stringify(updated));
       return updated;
     });
     
-    setStatusMessage({ type: 'success', text: `${selectedShippedOrders.size} order(s) deleted` });
     setSelectedShippedOrders(new Set());
   };
 
@@ -253,13 +337,19 @@ export default function AdminView() {
       return;
     }
     
+    setDeletedOrders(prev => {
+      const updated = new Set(prev);
+      selectedPrintedOrders.forEach(id => updated.add(id));
+      localStorage.setItem('deletedOrders', JSON.stringify(Array.from(updated)));
+      return updated;
+    });
+    
     setPrintedOrders(prev => {
       const updated = prev.filter(order => !selectedPrintedOrders.has(order.id));
       localStorage.setItem('printedOrders', JSON.stringify(updated));
       return updated;
     });
     
-    setStatusMessage({ type: 'success', text: `${selectedPrintedOrders.size} order(s) deleted` });
     setSelectedPrintedOrders(new Set());
   };
 
@@ -449,6 +539,19 @@ export default function AdminView() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <h2>Orders</h2>
                 <div style={{ display: 'flex', gap: '10px' }}>
+                  <Button onClick={() => handleSelectAllOrders(selectedOrders.size < orders.length)}>
+                    {selectedOrders.size === orders.length && orders.length > 0 ? 'Deselect All' : 'Select All'}
+                  </Button>
+                  {selectedOrders.size > 0 && (
+                    <Button onClick={markSelectedOrdersAsPrinted} tone="success">
+                      Mark as Printed ({String(selectedOrders.size)})
+                    </Button>
+                  )}
+                  {selectedOrders.size > 0 && (
+                    <Button onClick={deleteSelectedOrders} tone="critical">
+                      Delete Selected ({String(selectedOrders.size)})
+                    </Button>
+                  )}
                   {orders.filter(o => orderStatuses[o.id]?.printed).length > 0 && (
                     <Button onClick={confirmPrintOrders} tone="success">
                       Confirm Print ({String(orders.filter(o => orderStatuses[o.id]?.printed).length)})
@@ -474,7 +577,14 @@ export default function AdminView() {
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ borderBottom: '2px solid #ddd', background: '#f5f5f5' }}>
-                        <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold', width: '30px' }}></th>
+                        <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold', width: '30px' }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedOrders.size === orders.length && orders.length > 0}
+                            onChange={(e) => handleSelectAllOrders(e.target.checked)}
+                            style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                          />
+                        </th>
                         <th style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold', width: '80px' }}>Printed</th>
                         <th style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold', width: '80px' }}>Shipped</th>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Name</th>
@@ -520,9 +630,17 @@ export default function AdminView() {
                         const downloadFilename = `${sanitizeFilename(order.customerName)}_${String(order.gridSize || 0)}x${String(order.gridSize || 0)}.obj`;
                         const status = orderStatuses[order.id] || { printed: false, shipped: false };
                         
+                        const isSelected = selectedOrders.has(order.id);
                         return (
-                          <tr key={order.id} style={{ borderBottom: '1px solid #eee', background: status.shipped ? '#fff3cd' : 'white' }}>
-                            <td style={{ padding: '12px' }}></td>
+                          <tr key={order.id} style={{ borderBottom: '1px solid #eee', background: status.shipped ? '#fff3cd' : isSelected ? '#e3f2fd' : 'white' }}>
+                            <td style={{ padding: '12px' }}>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={(e) => handleSelectOrder(order.id, e.target.checked)}
+                                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                              />
+                            </td>
                             <td style={{ padding: '12px', textAlign: 'center' }}>
                               <input
                                 type="checkbox"
