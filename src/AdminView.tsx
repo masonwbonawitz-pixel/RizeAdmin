@@ -86,10 +86,13 @@ export default function AdminView() {
     setStatusMessage(null);
     try {
       const supabase = getSupabaseClient();
-      console.log('🔍 Loading orders from Supabase...');
+      console.log('🔍 Loading orders from jobs table...');
+      // Query completed jobs from the jobs table - this has all the data we need
       const { data, error } = await supabase
-        .from('orders')
-        .select('id, order_id, shopify_order_name, customer_name, completed_at, file_id, grid_size')
+        .from('jobs')
+        .select('id, job_id, file_id, grid_size, completed_at')
+        .eq('status', 'completed')
+        .not('file_id', 'is', null)
         .order('completed_at', { ascending: false });
 
       if (error) {
@@ -97,14 +100,14 @@ export default function AdminView() {
         throw new Error(error.message);
       }
 
-      console.log(`✅ Found ${data?.length || 0} orders in Supabase`);
+      console.log(`✅ Found ${data?.length || 0} completed jobs in Supabase`);
       if (data) {
         const mappedOrders: Order[] = data.map((row: any) => ({
           id: row.id,
-          orderId: row.order_id,
-          shopifyOrderName: row.shopify_order_name,
-          customerName: row.customer_name,
-          completedAt: row.completed_at,
+          orderId: row.job_id,
+          shopifyOrderName: undefined, // Jobs table doesn't have Shopify order info
+          customerName: 'Cart Customer', // Jobs table doesn't have customer name, use default
+          completedAt: row.completed_at || row.updated_at,
           fileId: row.file_id,
           gridSize: row.grid_size,
         }));
