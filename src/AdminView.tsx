@@ -18,7 +18,7 @@ interface Order {
 }
 
 export default function AdminView() {
-  const [activeTab, setActiveTab] = useState<'edit' | 'orders' | 'converter' | 'objRepair'>('edit');
+  const [activeTab, setActiveTab] = useState<'edit' | 'orders' | 'shipped' | 'converter' | 'objRepair'>('edit');
   const [prices, setPrices] = useState({
     '48x48': 39.99,
     '75x75': 49.99,
@@ -39,7 +39,10 @@ export default function AdminView() {
   const [isRepairing, setIsRepairing] = useState(false);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [shippedOrders, setShippedOrders] = useState<Order[]>([]);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
+  const [orderStatuses, setOrderStatuses] = useState<Record<string, { printed: boolean; shipped: boolean }>>({});
+  const [selectedShippedOrders, setSelectedShippedOrders] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     loadData();
@@ -50,6 +53,26 @@ export default function AdminView() {
       loadOrders();
     }
   }, [activeTab]);
+
+  // Load shipped orders from localStorage on mount
+  useEffect(() => {
+    const savedShipped = localStorage.getItem('shippedOrders');
+    if (savedShipped) {
+      try {
+        setShippedOrders(JSON.parse(savedShipped));
+      } catch (e) {
+        console.error('Error loading shipped orders:', e);
+      }
+    }
+    const savedStatuses = localStorage.getItem('orderStatuses');
+    if (savedStatuses) {
+      try {
+        setOrderStatuses(JSON.parse(savedStatuses));
+      } catch (e) {
+        console.error('Error loading order statuses:', e);
+      }
+    }
+  }, []);
 
   const loadData = async () => {
     try {
@@ -87,6 +110,19 @@ export default function AdminView() {
     try {
       const supabase = getSupabaseClient();
       console.log('🔍 Loading orders from jobs table...');
+      
+      // Load shipped orders from localStorage to filter them out
+      const savedShipped = localStorage.getItem('shippedOrders');
+      let currentShipped: Order[] = [];
+      if (savedShipped) {
+        try {
+          currentShipped = JSON.parse(savedShipped);
+          setShippedOrders(currentShipped);
+        } catch (e) {
+          console.error('Error loading shipped orders:', e);
+        }
+      }
+      
       // Query completed jobs from the jobs table - this has all the data we need
       const { data, error } = await supabase
         .from('jobs')
@@ -112,7 +148,11 @@ export default function AdminView() {
           gridSize: row.grid_size,
         }));
         console.log('📦 Mapped orders:', mappedOrders);
-        setOrders(mappedOrders);
+        
+        // Filter out orders that are already in shipped orders
+        const shippedOrderIds = new Set(currentShipped.map((o: Order) => o.id));
+        const activeOrders = mappedOrders.filter(order => !shippedOrderIds.has(order.id));
+        setOrders(activeOrders);
       }
     } catch (error) {
       console.error('❌ Error loading orders:', error);
@@ -150,6 +190,86 @@ export default function AdminView() {
     }
   };
 
+  const handleStatusChange = (orderId: string, field: 'printed' | 'shipped', value: boolean) => {
+    setOrderStatuses(prev => {
+      const updated = {
+        ...prev,
+        [orderId]: {
+          ...prev[orderId],
+          [field]: value,
+        }
+      };
+      localStorage.setItem('orderStatuses', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const confirmShipOrders = () => {
+    const ordersToShip = orders.filter(order => orderStatuses[order.id]?.shipped);
+    if (ordersToShip.length === 0) {
+      setStatusMessage({ type: 'error', text: 'No orders marked as shipped to confirm' });
+      return;
+    }
+    
+    setShippedOrders(prev => {
+      const updated = [...prev, ...ordersToShip];
+      localStorage.setItem('shippedOrders', JSON.stringify(updated));
+      return updated;
+    });
+    
+    setOrders(prev => prev.filter(order => !orderStatuses[order.id]?.shipped));
+    setOrderStatuses(prev => {
+      const updated = { ...prev };
+      ordersToShip.forEach(order => {
+        delete updated[order.id];
+      });
+      localStorage.setItem('orderStatuses', JSON.stringify(updated));
+      return updated;
+    });
+    
+    setStatusMessage({ type: 'success', text: `${ordersToShip.length} order(s) moved to shipped` });
+  };
+
+  const handleSelectShippedOrder = (orderId: string, selected: boolean) => {
+    setSelectedShippedOrders(prev => {
+      const updated = new Set(prev);
+      if (selected) {
+        updated.add(orderId);
+      } else {
+        updated.delete(orderId);
+      }
+      return updated;
+    });
+  };
+
+  const handleSelectAllShipped = (selectAll: boolean) => {
+    if (selectAll) {
+      setSelectedShippedOrders(new Set(shippedOrders.map(o => o.id)));
+    } else {
+      setSelectedShippedOrders(new Set());
+    }
+  };
+
+  const deleteSelectedShippedOrders = () => {
+    if (selectedShippedOrders.size === 0) {
+      setStatusMessage({ type: 'error', text: 'No orders selected to delete' });
+      return;
+    }
+    
+    setShippedOrders(prev => {
+      const updated = prev.filter(order => !selectedShippedOrders.has(order.id));
+      localStorage.setItem('shippedOrders', JSON.stringify(updated));
+      return updated;
+    });
+    
+    setStatusMessage({ type: 'success', text: `${selectedShippedOrders.size} order(s) deleted` });
+    setSelectedShippedOrders(new Set());
+  };
+
+  const sanitizeFilename = (name: string) => {
+    return name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+  };
+
   return (
     <div style={{ minHeight: '100vh', background: '#FFFBF5' }}>
       <div style={{ background: '#2d5016', color: 'white', padding: '15px', textAlign: 'center' }}>
@@ -180,6 +300,19 @@ export default function AdminView() {
             }}
           >
             Orders
+          </button>
+          <button
+            onClick={() => setActiveTab('shipped')}
+            style={{
+              padding: '8px 20px',
+              background: activeTab === 'shipped' ? 'white' : 'rgba(255,255,255,0.2)',
+              color: activeTab === 'shipped' ? '#2d5016' : 'white',
+              border: '1px solid rgba(255,255,255,0.3)',
+              borderRadius: '4px',
+              cursor: 'pointer',
+            }}
+          >
+            Shipped ({shippedOrders.length})
           </button>
           <button
             onClick={() => setActiveTab('converter')}
@@ -323,9 +456,16 @@ export default function AdminView() {
             <div style={{ padding: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <h2>Orders</h2>
-                <Button onClick={loadOrders} disabled={isLoadingOrders}>
-                  {isLoadingOrders ? 'Loading...' : 'Refresh'}
-                </Button>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  {orders.filter(o => orderStatuses[o.id]?.shipped).length > 0 && (
+                    <Button onClick={confirmShipOrders} tone="success">
+                      Confirm Ship ({String(orders.filter(o => orderStatuses[o.id]?.shipped).length)})
+                    </Button>
+                  )}
+                  <Button onClick={loadOrders} disabled={isLoadingOrders}>
+                    {isLoadingOrders ? 'Loading...' : 'Refresh'}
+                  </Button>
+                </div>
               </div>
               
               {isLoadingOrders ? (
@@ -337,18 +477,21 @@ export default function AdminView() {
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ borderBottom: '2px solid #ddd', background: '#f5f5f5' }}>
+                        <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold', width: '30px' }}></th>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Name</th>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Date and Time</th>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Size</th>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Image</th>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Download</th>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Order ID</th>
+                        <th style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold', width: '80px' }}>Printed</th>
+                        <th style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold', width: '80px' }}>Shipped</th>
                       </tr>
                     </thead>
                     <tbody>
                       {orders.length === 0 ? (
                         <tr>
-                          <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
+                          <td colSpan={9} style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
                             <p>No orders found in the database.</p>
                             <p style={{ fontSize: '14px', marginTop: '10px' }}>
                               Orders will appear here automatically when customers complete purchases via Shopify.
@@ -377,8 +520,12 @@ export default function AdminView() {
                           ? `${supabaseUrl}/storage/v1/object/public/${bucketName}/temp/${order.fileId}.obj`
                           : null;
                         
+                        const downloadFilename = `${sanitizeFilename(order.customerName)}_${String(order.gridSize || 0)}x${String(order.gridSize || 0)}.obj`;
+                        const status = orderStatuses[order.id] || { printed: false, shipped: false };
+                        
                         return (
-                          <tr key={order.id} style={{ borderBottom: '1px solid #eee' }}>
+                          <tr key={order.id} style={{ borderBottom: '1px solid #eee', background: status.shipped ? '#fff3cd' : 'white' }}>
+                            <td style={{ padding: '12px' }}></td>
                             <td style={{ padding: '12px' }}>{order.customerName}</td>
                             <td style={{ padding: '12px' }}>{formattedDate}</td>
                             <td style={{ padding: '12px' }}>{order.gridSize ? `${order.gridSize}×${order.gridSize}` : '-'}</td>
@@ -406,7 +553,156 @@ export default function AdminView() {
                               {objUrl ? (
                                 <a
                                   href={objUrl}
-                                  download
+                                  download={downloadFilename}
+                                  style={{
+                                    color: '#007ace',
+                                    textDecoration: 'none',
+                                    fontWeight: '500',
+                                  }}
+                                  onMouseOver={(e) => e.currentTarget.style.textDecoration = 'underline'}
+                                  onMouseOut={(e) => e.currentTarget.style.textDecoration = 'none'}
+                                >
+                                  Download OBJ
+                                </a>
+                              ) : (
+                                <span style={{ color: '#999' }}>No file</span>
+                              )}
+                            </td>
+                            <td style={{ padding: '12px' }}>
+                              {order.shopifyOrderName || order.orderId}
+                            </td>
+                            <td style={{ padding: '12px', textAlign: 'center' }}>
+                              <input
+                                type="checkbox"
+                                checked={status.printed}
+                                onChange={(e) => handleStatusChange(order.id, 'printed', e.target.checked)}
+                                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                              />
+                            </td>
+                            <td style={{ padding: '12px', textAlign: 'center' }}>
+                              <input
+                                type="checkbox"
+                                checked={status.shipped}
+                                onChange={(e) => handleStatusChange(order.id, 'shipped', e.target.checked)}
+                                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                              />
+                            </td>
+                          </tr>
+                        );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </Card>
+        )}
+
+        {activeTab === 'shipped' && (
+          <Card>
+            <div style={{ padding: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <h2>Shipped Orders</h2>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <Button onClick={() => handleSelectAllShipped(selectedShippedOrders.size < shippedOrders.length)}>
+                    {selectedShippedOrders.size === shippedOrders.length && shippedOrders.length > 0 ? 'Deselect All' : 'Select All'}
+                  </Button>
+                  <Button onClick={deleteSelectedShippedOrders} tone="critical" disabled={selectedShippedOrders.size === 0}>
+                    Delete Selected ({String(selectedShippedOrders.size)})
+                  </Button>
+                </div>
+              </div>
+              
+              {shippedOrders.length === 0 ? (
+                <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
+                  <p>No shipped orders yet.</p>
+                  <p style={{ fontSize: '14px', marginTop: '10px' }}>
+                    Mark orders as shipped and confirm them to move them here.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid #ddd', background: '#f5f5f5' }}>
+                        <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold', width: '30px' }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedShippedOrders.size === shippedOrders.length && shippedOrders.length > 0}
+                            onChange={(e) => handleSelectAllShipped(e.target.checked)}
+                            style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                          />
+                        </th>
+                        <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Name</th>
+                        <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Date and Time</th>
+                        <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Size</th>
+                        <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Image</th>
+                        <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Download</th>
+                        <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Order ID</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {shippedOrders.map((order) => {
+                        const completedDate = new Date(order.completedAt);
+                        const formattedDate = completedDate.toLocaleString('en-US', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric',
+                          hour: 'numeric',
+                          minute: '2-digit',
+                          hour12: true,
+                        });
+                        
+                        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://bfgbukjtxmxufgocqfjf.supabase.co';
+                        const bucketName = 'objs';
+                        const imageUrl = order.fileId 
+                          ? `${supabaseUrl}/storage/v1/object/public/${bucketName}/temp/${order.fileId}_preview.png`
+                          : null;
+                        const objUrl = order.fileId 
+                          ? `${supabaseUrl}/storage/v1/object/public/${bucketName}/temp/${order.fileId}.obj`
+                          : null;
+                        const downloadFilename = `${sanitizeFilename(order.customerName)}_${String(order.gridSize || 0)}x${String(order.gridSize || 0)}.obj`;
+                        const isSelected = selectedShippedOrders.has(order.id);
+                        
+                        return (
+                          <tr key={order.id} style={{ borderBottom: '1px solid #eee', background: isSelected ? '#e3f2fd' : 'white' }}>
+                            <td style={{ padding: '12px' }}>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={(e) => handleSelectShippedOrder(order.id, e.target.checked)}
+                                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                              />
+                            </td>
+                            <td style={{ padding: '12px' }}>{order.customerName}</td>
+                            <td style={{ padding: '12px' }}>{formattedDate}</td>
+                            <td style={{ padding: '12px' }}>{order.gridSize ? `${order.gridSize}×${order.gridSize}` : '-'}</td>
+                            <td style={{ padding: '12px' }}>
+                              {imageUrl ? (
+                                <a
+                                  href={imageUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{
+                                    color: '#007ace',
+                                    textDecoration: 'none',
+                                    fontWeight: '500',
+                                  }}
+                                  onMouseOver={(e) => e.currentTarget.style.textDecoration = 'underline'}
+                                  onMouseOut={(e) => e.currentTarget.style.textDecoration = 'none'}
+                                >
+                                  View Image
+                                </a>
+                              ) : (
+                                <span style={{ color: '#999' }}>No image</span>
+                              )}
+                            </td>
+                            <td style={{ padding: '12px' }}>
+                              {objUrl ? (
+                                <a
+                                  href={objUrl}
+                                  download={downloadFilename}
                                   style={{
                                     color: '#007ace',
                                     textDecoration: 'none',
@@ -426,8 +722,7 @@ export default function AdminView() {
                             </td>
                           </tr>
                         );
-                        })
-                      )}
+                      })}
                     </tbody>
                   </table>
                 </div>
