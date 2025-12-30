@@ -433,6 +433,11 @@ export default function AdminView() {
                   <Button onClick={() => handleSelectAllShipped(selectedShippedOrders.size < shippedOrders.length)}>
                     {selectedShippedOrders.size === shippedOrders.length && shippedOrders.length > 0 ? 'Deselect All' : 'Select All'}
                   </Button>
+                  {selectedShippedOrders.size > 0 && (
+                    <Button onClick={markSelectedAsUnshipped} tone="success">
+                      Mark as Unshipped ({String(selectedShippedOrders.size)})
+                    </Button>
+                  )}
                   <Button onClick={deleteSelectedShippedOrders} tone="critical" disabled={selectedShippedOrders.size === 0}>
                     Delete Selected ({String(selectedShippedOrders.size)})
                   </Button>
