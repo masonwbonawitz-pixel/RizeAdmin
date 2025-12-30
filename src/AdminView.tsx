@@ -14,6 +14,7 @@ interface Order {
   customerName: string;
   completedAt: string;
   fileId?: string;
+  gridSize?: number;
 }
 
 export default function AdminView() {
@@ -88,7 +89,7 @@ export default function AdminView() {
       console.log('🔍 Loading orders from Supabase...');
       const { data, error } = await supabase
         .from('orders')
-        .select('id, order_id, shopify_order_name, customer_name, completed_at, file_id')
+        .select('id, order_id, shopify_order_name, customer_name, completed_at, file_id, grid_size')
         .order('completed_at', { ascending: false });
 
       if (error) {
@@ -105,6 +106,7 @@ export default function AdminView() {
           customerName: row.customer_name,
           completedAt: row.completed_at,
           fileId: row.file_id,
+          gridSize: row.grid_size,
         }));
         console.log('📦 Mapped orders:', mappedOrders);
         setOrders(mappedOrders);
@@ -334,6 +336,7 @@ export default function AdminView() {
                       <tr style={{ borderBottom: '2px solid #ddd', background: '#f5f5f5' }}>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Name</th>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Date and Time</th>
+                        <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Size</th>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Image</th>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Download</th>
                         <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Order ID</th>
@@ -342,7 +345,7 @@ export default function AdminView() {
                     <tbody>
                       {orders.length === 0 ? (
                         <tr>
-                          <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
+                          <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
                             <p>No orders found in the database.</p>
                             <p style={{ fontSize: '14px', marginTop: '10px' }}>
                               Orders will appear here automatically when customers complete purchases via Shopify.
@@ -375,6 +378,7 @@ export default function AdminView() {
                           <tr key={order.id} style={{ borderBottom: '1px solid #eee' }}>
                             <td style={{ padding: '12px' }}>{order.customerName}</td>
                             <td style={{ padding: '12px' }}>{formattedDate}</td>
+                            <td style={{ padding: '12px' }}>{order.gridSize ? `${order.gridSize}×${order.gridSize}` : '-'}</td>
                             <td style={{ padding: '12px' }}>
                               {imageUrl ? (
                                 <a
