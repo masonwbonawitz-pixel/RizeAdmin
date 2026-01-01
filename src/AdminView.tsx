@@ -423,6 +423,55 @@ export default function AdminView() {
     return name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
   };
 
+  const downloadObjWithFilePicker = async (objUrl: string, defaultFilename: string) => {
+    try {
+      // Check if File System Access API is supported
+      if ('showSaveFilePicker' in window) {
+        // Fetch the file
+        const response = await fetch(objUrl);
+        if (!response.ok) {
+          throw new Error('Failed to fetch OBJ file');
+        }
+        const blob = await response.blob();
+        
+        // Show file picker
+        const fileHandle = await (window as any).showSaveFilePicker({
+          suggestedName: defaultFilename,
+          types: [{
+            description: 'OBJ Files',
+            accept: { 'model/obj': ['.obj'] },
+          }],
+        });
+        
+        // Write the file
+        const writable = await fileHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        
+        setStatusMessage({ type: 'success', text: 'File saved successfully' });
+      } else {
+        // Fallback for browsers that don't support File System Access API
+        const link = document.createElement('a');
+        link.href = objUrl;
+        link.download = defaultFilename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setStatusMessage({ type: 'success', text: 'Download started' });
+      }
+    } catch (error: any) {
+      // User cancelled the file picker
+      if (error.name === 'AbortError') {
+        return;
+      }
+      console.error('Error downloading OBJ file:', error);
+      setStatusMessage({ 
+        type: 'error', 
+        text: `Error downloading file: ${error.message || 'Unknown error'}` 
+      });
+    }
+  };
+
   return (
     <div style={{ minHeight: '100vh', background: '#FFFBF5' }}>
       <div style={{ background: '#2d5016', color: 'white', padding: '15px', textAlign: 'center' }}>
@@ -602,19 +651,23 @@ export default function AdminView() {
                             </td>
                             <td style={{ padding: '12px' }}>
                               {objUrl ? (
-                                <a
-                                  href={objUrl}
-                                  download={downloadFilename}
+                                <button
+                                  onClick={() => downloadObjWithFilePicker(objUrl, downloadFilename)}
                                   style={{
                                     color: '#007ace',
                                     textDecoration: 'none',
                                     fontWeight: '500',
+                                    background: 'none',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    padding: 0,
+                                    font: 'inherit',
                                   }}
                                   onMouseOver={(e) => e.currentTarget.style.textDecoration = 'underline'}
                                   onMouseOut={(e) => e.currentTarget.style.textDecoration = 'none'}
                                 >
                                   Download OBJ
-                                </a>
+                                </button>
                               ) : (
                                 <span style={{ color: '#999' }}>No file</span>
                               )}
@@ -745,19 +798,23 @@ export default function AdminView() {
                             </td>
                             <td style={{ padding: '12px' }}>
                               {objUrl ? (
-                                <a
-                                  href={objUrl}
-                                  download={downloadFilename}
+                                <button
+                                  onClick={() => downloadObjWithFilePicker(objUrl, downloadFilename)}
                                   style={{
                                     color: '#007ace',
                                     textDecoration: 'none',
                                     fontWeight: '500',
+                                    background: 'none',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    padding: 0,
+                                    font: 'inherit',
                                   }}
                                   onMouseOver={(e) => e.currentTarget.style.textDecoration = 'underline'}
                                   onMouseOut={(e) => e.currentTarget.style.textDecoration = 'none'}
                                 >
                                   Download OBJ
-                                </a>
+                                </button>
                               ) : (
                                 <span style={{ color: '#999' }}>No file</span>
                               )}
@@ -882,19 +939,23 @@ export default function AdminView() {
                             </td>
                             <td style={{ padding: '12px' }}>
                               {objUrl ? (
-                                <a
-                                  href={objUrl}
-                                  download={downloadFilename}
+                                <button
+                                  onClick={() => downloadObjWithFilePicker(objUrl, downloadFilename)}
                                   style={{
                                     color: '#007ace',
                                     textDecoration: 'none',
                                     fontWeight: '500',
+                                    background: 'none',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    padding: 0,
+                                    font: 'inherit',
                                   }}
                                   onMouseOver={(e) => e.currentTarget.style.textDecoration = 'underline'}
                                   onMouseOut={(e) => e.currentTarget.style.textDecoration = 'none'}
                                 >
                                   Download OBJ
-                                </a>
+                                </button>
                               ) : (
                                 <span style={{ color: '#999' }}>No file</span>
                               )}
