@@ -81,7 +81,7 @@ export default function AdminView() {
     setStatusMessage(null);
     try {
       const supabase = getSupabaseClient();
-      console.log('🔍 Loading orders from jobs table...');
+      console.log('🔍 Loading paid orders from build_sessions and orders tables...');
       
       // Load printed and shipped orders from localStorage to filter them out
       const savedPrinted = localStorage.getItem('printedOrders');
@@ -105,30 +105,67 @@ export default function AdminView() {
         }
       }
       
-      // Query completed jobs from the jobs table - this has all the data we need
-      const { data, error } = await supabase
-        .from('jobs')
-        .select('id, job_id, file_id, grid_size, completed_at')
-        .eq('status', 'completed')
-        .not('file_id', 'is', null)
-        .order('completed_at', { ascending: false });
+      // Query paid build_sessions and join with orders table to get OBJ URL
+      // Only show orders with status = 'paid' (as per spec)
+      const { data: buildSessions, error: buildSessionsError } = await supabase
+        .from('build_sessions')
+        .select(`
+          id,
+          shopify_order_id,
+          variant_size,
+          paid_at,
+          parameters
+        `)
+        .eq('status', 'paid')
+        .not('shopify_order_id', 'is', null)
+        .order('paid_at', { ascending: false });
 
-      if (error) {
-        console.error('❌ Supabase query error:', error);
-        throw new Error(error.message);
+      if (buildSessionsError) {
+        console.error('❌ Supabase query error (build_sessions):', buildSessionsError);
+        throw new Error(buildSessionsError.message);
       }
 
-      console.log(`✅ Found ${data?.length || 0} completed jobs in Supabase`);
-      if (data) {
-        const mappedOrders: Order[] = data.map((row: any) => ({
-          id: row.id,
-          orderId: row.job_id,
-          shopifyOrderName: undefined, // Jobs table doesn't have Shopify order info
-          customerName: 'Cart Customer', // Jobs table doesn't have customer name, use default
-          completedAt: row.completed_at || row.updated_at,
-          fileId: row.file_id,
-          gridSize: row.grid_size,
-        }));
+      console.log(`✅ Found ${buildSessions?.length || 0} paid build sessions`);
+
+      // Now get corresponding orders to get OBJ URL and customer info
+      const orderIds = buildSessions?.map(bs => bs.shopify_order_id).filter(Boolean) || [];
+      
+      let ordersData: any[] = [];
+      if (orderIds.length > 0) {
+        const { data: orders, error: ordersError } = await supabase
+          .from('orders')
+          .select('*')
+          .in('shopify_order_id', orderIds);
+
+        if (ordersError) {
+          console.error('❌ Supabase query error (orders):', ordersError);
+          // Continue even if orders query fails - we can still show build sessions
+        } else {
+          ordersData = orders || [];
+        }
+      }
+
+      // Map build sessions to orders, joining with orders table
+      if (buildSessions) {
+        const mappedOrders: Order[] = buildSessions.map((bs: any) => {
+          // Find corresponding order
+          const order = ordersData.find(o => o.shopify_order_id === bs.shopify_order_id);
+          
+          // Extract grid size from parameters or variant_size
+          const gridSize = bs.parameters?.gridSize || 
+            parseInt(bs.variant_size?.match(/\d+/)?.[0] || '75');
+
+          return {
+            id: bs.id, // Use build session ID
+            orderId: order?.order_id || bs.id,
+            shopifyOrderName: order?.shopify_order_name || bs.shopify_order_id,
+            customerName: order?.customer_name || 'Unknown Customer',
+            completedAt: bs.paid_at || order?.completed_at,
+            fileId: order?.file_id || bs.id,
+            gridSize,
+          };
+        });
+        
         console.log('📦 Mapped orders:', mappedOrders);
         
         // Get deleted order IDs
