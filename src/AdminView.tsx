@@ -12,8 +12,19 @@ interface Order {
   gridSize?: number;
 }
 
+interface BuildSession {
+  id: string;
+  status?: string | null;
+  shopify_order_id?: string | null;
+  variant_size?: string | null;
+  paid_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  parameters?: any;
+}
+
 export default function AdminView() {
-  const [activeTab, setActiveTab] = useState<'orders' | 'printed' | 'shipped'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'printed' | 'shipped' | 'build_sessions'>('orders');
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [printedOrders, setPrintedOrders] = useState<Order[]>([]);
@@ -23,11 +34,26 @@ export default function AdminView() {
   const [selectedPrintedOrders, setSelectedPrintedOrders] = useState<Set<string>>(new Set());
   const [selectedShippedOrders, setSelectedShippedOrders] = useState<Set<string>>(new Set());
 
+  const [buildSessions, setBuildSessions] = useState<BuildSession[]>([]);
+  const [isLoadingBuildSessions, setIsLoadingBuildSessions] = useState(false);
+  const [selectedBuildSessionId, setSelectedBuildSessionId] = useState<string | null>(null);
+  const [buildSessionDraft, setBuildSessionDraft] = useState<{ status?: string | null; shopify_order_id?: string | null; variant_size?: string | null; paid_at?: string | null; parametersText?: string } | null>(null);
+
   useEffect(() => {
     if (activeTab === 'orders') {
       loadOrders();
     }
+    if (activeTab === 'build_sessions') {
+      loadBuildSessions();
+    }
   }, [activeTab]);
+
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://bfgbukjtxmxufgocqfjf.supabase.co';
+  const getPublicObjectUrl = (bucket: string, path: string) => {
+    const normalizedBucket = bucket.replace(/^\/+|\/+$/g, '');
+    const normalizedPath = path.replace(/^\/+/, '');
+    return `${supabaseUrl}/storage/v1/object/public/${normalizedBucket}/${normalizedPath}`;
+  };
 
   // Load printed and shipped orders from localStorage on mount
   useEffect(() => {
@@ -189,6 +215,82 @@ export default function AdminView() {
       });
     } finally {
       setIsLoadingOrders(false);
+    }
+  };
+
+  const loadBuildSessions = async () => {
+    setIsLoadingBuildSessions(true);
+    setStatusMessage(null);
+    try {
+      const supabase = getSupabaseClient();
+      const { data, error } = await supabase
+        .from('build_sessions')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(200);
+
+      if (error) {
+        console.error('❌ Supabase query error (build_sessions):', error);
+        throw new Error(error.message);
+      }
+
+      setBuildSessions((data as any[]) || []);
+    } catch (error: any) {
+      console.error('Error loading build sessions:', error);
+      setStatusMessage({ type: 'error', text: `Error loading build sessions: ${error.message || 'Unknown error'}` });
+    } finally {
+      setIsLoadingBuildSessions(false);
+    }
+  };
+
+  const selectBuildSession = (bs: BuildSession) => {
+    setSelectedBuildSessionId(bs.id);
+    setBuildSessionDraft({
+      status: bs.status ?? null,
+      shopify_order_id: bs.shopify_order_id ?? null,
+      variant_size: bs.variant_size ?? null,
+      paid_at: bs.paid_at ?? null,
+      parametersText: bs.parameters != null ? JSON.stringify(bs.parameters, null, 2) : '',
+    });
+  };
+
+  const saveBuildSession = async () => {
+    if (!selectedBuildSessionId || !buildSessionDraft) return;
+    setStatusMessage(null);
+    try {
+      const supabase = getSupabaseClient();
+
+      let parsedParameters: any = null;
+      const raw = (buildSessionDraft.parametersText ?? '').trim();
+      if (raw.length > 0) {
+        try {
+          parsedParameters = JSON.parse(raw);
+        } catch {
+          throw new Error('Parameters must be valid JSON');
+        }
+      }
+
+      const { error } = await supabase
+        .from('build_sessions')
+        .update({
+          status: buildSessionDraft.status ?? null,
+          shopify_order_id: buildSessionDraft.shopify_order_id ?? null,
+          variant_size: buildSessionDraft.variant_size ?? null,
+          paid_at: buildSessionDraft.paid_at ?? null,
+          parameters: parsedParameters,
+        })
+        .eq('id', selectedBuildSessionId);
+
+      if (error) {
+        console.error('❌ Supabase update error (build_sessions):', error);
+        throw new Error(error.message);
+      }
+
+      setStatusMessage({ type: 'success', text: 'Build session updated' });
+      await loadBuildSessions();
+    } catch (error: any) {
+      console.error('Error saving build session:', error);
+      setStatusMessage({ type: 'error', text: `Error saving build session: ${error.message || 'Unknown error'}` });
     }
   };
 
@@ -553,6 +655,19 @@ export default function AdminView() {
           >
             Shipped ({shippedOrders.length})
           </button>
+          <button
+            onClick={() => setActiveTab('build_sessions')}
+            style={{
+              padding: '8px 20px',
+              background: activeTab === 'build_sessions' ? 'white' : 'rgba(255,255,255,0.2)',
+              color: activeTab === 'build_sessions' ? '#2d5016' : 'white',
+              border: '1px solid rgba(255,255,255,0.3)',
+              borderRadius: '4px',
+              cursor: 'pointer',
+            }}
+          >
+            Build Sessions
+          </button>
         </div>
       </div>
 
@@ -631,15 +746,9 @@ export default function AdminView() {
                           hour12: true,
                         });
                         
-                        // Construct URLs for files in temp bucket - use direct Supabase storage URL format
-                        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://bfgbukjtxmxufgocqfjf.supabase.co';
-                        const bucketName = 'objs';
-                        const imageUrl = order.fileId 
-                          ? `${supabaseUrl}/storage/v1/object/public/${bucketName}/temp/${order.fileId}_preview.png`
-                          : null;
-                        const objUrl = order.fileId 
-                          ? `${supabaseUrl}/storage/v1/object/public/${bucketName}/temp/${order.fileId}.obj`
-                          : null;
+                        const imageUrl = order.fileId ? getPublicObjectUrl('previews', `${order.fileId}_preview.png`) : null;
+                        const objUrl = order.fileId ? getPublicObjectUrl('orders', `${order.fileId}.obj`) : null;
+                        const stlUrl = order.fileId ? getPublicObjectUrl('previews', `${order.fileId}.stl`) : null;
                         
                         const downloadFilename = `${sanitizeFilename(order.customerName)}_${String(order.gridSize || 0)}x${String(order.gridSize || 0)}.obj`;
                         const status = orderStatuses[order.id] || { printed: false, shipped: false };
@@ -687,27 +796,47 @@ export default function AdminView() {
                               )}
                             </td>
                             <td style={{ padding: '12px' }}>
-                              {objUrl ? (
-                                <button
-                                  onClick={() => downloadObjWithFilePicker(objUrl, downloadFilename)}
-                                  style={{
-                                    color: '#007ace',
-                                    textDecoration: 'none',
-                                    fontWeight: '500',
-                                    background: 'none',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                    padding: 0,
-                                    font: 'inherit',
-                                  }}
-                                  onMouseOver={(e) => e.currentTarget.style.textDecoration = 'underline'}
-                                  onMouseOut={(e) => e.currentTarget.style.textDecoration = 'none'}
-                                >
-                                  Download OBJ
-                                </button>
-                              ) : (
-                                <span style={{ color: '#999' }}>No file</span>
-                              )}
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {objUrl ? (
+                                  <button
+                                    onClick={() => downloadObjWithFilePicker(objUrl, downloadFilename)}
+                                    style={{
+                                      color: '#007ace',
+                                      textDecoration: 'none',
+                                      fontWeight: '500',
+                                      background: 'none',
+                                      border: 'none',
+                                      cursor: 'pointer',
+                                      padding: 0,
+                                      font: 'inherit',
+                                      textAlign: 'left',
+                                    }}
+                                    onMouseOver={(e) => (e.currentTarget.style.textDecoration = 'underline')}
+                                    onMouseOut={(e) => (e.currentTarget.style.textDecoration = 'none')}
+                                  >
+                                    Download OBJ
+                                  </button>
+                                ) : (
+                                  <span style={{ color: '#999' }}>No OBJ</span>
+                                )}
+                                {stlUrl ? (
+                                  <a
+                                    href={stlUrl}
+                                    download
+                                    style={{
+                                      color: '#007ace',
+                                      textDecoration: 'none',
+                                      fontWeight: '500',
+                                    }}
+                                    onMouseOver={(e) => (e.currentTarget.style.textDecoration = 'underline')}
+                                    onMouseOut={(e) => (e.currentTarget.style.textDecoration = 'none')}
+                                  >
+                                    Download STL
+                                  </a>
+                                ) : (
+                                  <span style={{ color: '#999' }}>No STL</span>
+                                )}
+                              </div>
                             </td>
                             <td style={{ padding: '12px' }}>
                               {order.shopifyOrderName || order.orderId}
@@ -718,6 +847,130 @@ export default function AdminView() {
                       )}
                     </tbody>
                   </table>
+                </div>
+              )}
+            </div>
+          </Card>
+        )}
+
+        {activeTab === 'build_sessions' && (
+          <Card>
+            <div style={{ padding: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <h2>Build Sessions</h2>
+                <Button onClick={loadBuildSessions} disabled={isLoadingBuildSessions}>
+                  {isLoadingBuildSessions ? 'Loading...' : 'Refresh'}
+                </Button>
+              </div>
+
+              {isLoadingBuildSessions ? (
+                <div style={{ padding: '20px', textAlign: 'center' }}>
+                  <p>Loading build sessions from Supabase...</p>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px', alignItems: 'start' }}>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '2px solid #ddd', background: '#f5f5f5' }}>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>ID</th>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Status</th>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Shopify Order</th>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Variant</th>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Paid At</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {buildSessions.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} style={{ padding: '20px', color: '#666' }}>No build sessions found.</td>
+                          </tr>
+                        ) : (
+                          buildSessions.map((bs) => {
+                            const isSelected = selectedBuildSessionId === bs.id;
+                            return (
+                              <tr
+                                key={bs.id}
+                                onClick={() => selectBuildSession(bs)}
+                                style={{
+                                  borderBottom: '1px solid #eee',
+                                  cursor: 'pointer',
+                                  background: isSelected ? '#e3f2fd' : 'white',
+                                }}
+                              >
+                                <td style={{ padding: '12px', fontFamily: 'monospace' }}>{bs.id}</td>
+                                <td style={{ padding: '12px' }}>{bs.status ?? '-'}</td>
+                                <td style={{ padding: '12px' }}>{bs.shopify_order_id ?? '-'}</td>
+                                <td style={{ padding: '12px' }}>{bs.variant_size ?? '-'}</td>
+                                <td style={{ padding: '12px' }}>{bs.paid_at ? new Date(bs.paid_at).toLocaleString() : '-'}</td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div style={{ border: '1px solid #eee', borderRadius: '8px', padding: '16px', background: 'white' }}>
+                    {!selectedBuildSessionId || !buildSessionDraft ? (
+                      <div style={{ color: '#666' }}>Select a build session to edit.</div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <div style={{ fontSize: '12px', color: '#666' }}>Editing</div>
+                        <div style={{ fontFamily: 'monospace', fontSize: '12px', wordBreak: 'break-all' }}>{selectedBuildSessionId}</div>
+
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <span style={{ fontWeight: 600 }}>Status</span>
+                          <input
+                            value={buildSessionDraft.status ?? ''}
+                            onChange={(e) => setBuildSessionDraft((d) => (d ? { ...d, status: e.target.value } : d))}
+                            style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
+                          />
+                        </label>
+
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <span style={{ fontWeight: 600 }}>Shopify Order ID</span>
+                          <input
+                            value={buildSessionDraft.shopify_order_id ?? ''}
+                            onChange={(e) => setBuildSessionDraft((d) => (d ? { ...d, shopify_order_id: e.target.value } : d))}
+                            style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
+                          />
+                        </label>
+
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <span style={{ fontWeight: 600 }}>Variant Size</span>
+                          <input
+                            value={buildSessionDraft.variant_size ?? ''}
+                            onChange={(e) => setBuildSessionDraft((d) => (d ? { ...d, variant_size: e.target.value } : d))}
+                            style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
+                          />
+                        </label>
+
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <span style={{ fontWeight: 600 }}>Paid At (ISO or empty)</span>
+                          <input
+                            value={buildSessionDraft.paid_at ?? ''}
+                            onChange={(e) => setBuildSessionDraft((d) => (d ? { ...d, paid_at: e.target.value } : d))}
+                            style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
+                          />
+                        </label>
+
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <span style={{ fontWeight: 600 }}>Parameters (JSON)</span>
+                          <textarea
+                            value={buildSessionDraft.parametersText ?? ''}
+                            onChange={(e) => setBuildSessionDraft((d) => (d ? { ...d, parametersText: e.target.value } : d))}
+                            rows={10}
+                            style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', fontFamily: 'monospace' }}
+                          />
+                        </label>
+
+                        <Button onClick={saveBuildSession} tone="success">
+                          Save
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -788,15 +1041,10 @@ export default function AdminView() {
                           minute: '2-digit',
                           hour12: true,
                         });
-                        
-                        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://bfgbukjtxmxufgocqfjf.supabase.co';
-                        const bucketName = 'objs';
-                        const imageUrl = order.fileId 
-                          ? `${supabaseUrl}/storage/v1/object/public/${bucketName}/temp/${order.fileId}_preview.png`
-                          : null;
-                        const objUrl = order.fileId 
-                          ? `${supabaseUrl}/storage/v1/object/public/${bucketName}/temp/${order.fileId}.obj`
-                          : null;
+
+                        const imageUrl = order.fileId ? getPublicObjectUrl('previews', `${order.fileId}_preview.png`) : null;
+                        const objUrl = order.fileId ? getPublicObjectUrl('orders', `${order.fileId}.obj`) : null;
+                        const stlUrl = order.fileId ? getPublicObjectUrl('previews', `${order.fileId}.stl`) : null;
                         const downloadFilename = `${sanitizeFilename(order.customerName)}_${String(order.gridSize || 0)}x${String(order.gridSize || 0)}.obj`;
                         const isSelected = selectedPrintedOrders.has(order.id);
                         
@@ -834,27 +1082,47 @@ export default function AdminView() {
                               )}
                             </td>
                             <td style={{ padding: '12px' }}>
-                              {objUrl ? (
-                                <button
-                                  onClick={() => downloadObjWithFilePicker(objUrl, downloadFilename)}
-                                  style={{
-                                    color: '#007ace',
-                                    textDecoration: 'none',
-                                    fontWeight: '500',
-                                    background: 'none',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                    padding: 0,
-                                    font: 'inherit',
-                                  }}
-                                  onMouseOver={(e) => e.currentTarget.style.textDecoration = 'underline'}
-                                  onMouseOut={(e) => e.currentTarget.style.textDecoration = 'none'}
-                                >
-                                  Download OBJ
-                                </button>
-                              ) : (
-                                <span style={{ color: '#999' }}>No file</span>
-                              )}
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {objUrl ? (
+                                  <button
+                                    onClick={() => downloadObjWithFilePicker(objUrl, downloadFilename)}
+                                    style={{
+                                      color: '#007ace',
+                                      textDecoration: 'none',
+                                      fontWeight: '500',
+                                      background: 'none',
+                                      border: 'none',
+                                      cursor: 'pointer',
+                                      padding: 0,
+                                      font: 'inherit',
+                                      textAlign: 'left',
+                                    }}
+                                    onMouseOver={(e) => (e.currentTarget.style.textDecoration = 'underline')}
+                                    onMouseOut={(e) => (e.currentTarget.style.textDecoration = 'none')}
+                                  >
+                                    Download OBJ
+                                  </button>
+                                ) : (
+                                  <span style={{ color: '#999' }}>No OBJ</span>
+                                )}
+                                {stlUrl ? (
+                                  <a
+                                    href={stlUrl}
+                                    download
+                                    style={{
+                                      color: '#007ace',
+                                      textDecoration: 'none',
+                                      fontWeight: '500',
+                                    }}
+                                    onMouseOver={(e) => (e.currentTarget.style.textDecoration = 'underline')}
+                                    onMouseOut={(e) => (e.currentTarget.style.textDecoration = 'none')}
+                                  >
+                                    Download STL
+                                  </a>
+                                ) : (
+                                  <span style={{ color: '#999' }}>No STL</span>
+                                )}
+                              </div>
                             </td>
                             <td style={{ padding: '12px' }}>
                               {order.shopifyOrderName || order.orderId}
@@ -929,15 +1197,10 @@ export default function AdminView() {
                           minute: '2-digit',
                           hour12: true,
                         });
-                        
-                        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://bfgbukjtxmxufgocqfjf.supabase.co';
-                        const bucketName = 'objs';
-                        const imageUrl = order.fileId 
-                          ? `${supabaseUrl}/storage/v1/object/public/${bucketName}/temp/${order.fileId}_preview.png`
-                          : null;
-                        const objUrl = order.fileId 
-                          ? `${supabaseUrl}/storage/v1/object/public/${bucketName}/temp/${order.fileId}.obj`
-                          : null;
+
+                        const imageUrl = order.fileId ? getPublicObjectUrl('previews', `${order.fileId}_preview.png`) : null;
+                        const objUrl = order.fileId ? getPublicObjectUrl('orders', `${order.fileId}.obj`) : null;
+                        const stlUrl = order.fileId ? getPublicObjectUrl('previews', `${order.fileId}.stl`) : null;
                         const downloadFilename = `${sanitizeFilename(order.customerName)}_${String(order.gridSize || 0)}x${String(order.gridSize || 0)}.obj`;
                         const isSelected = selectedShippedOrders.has(order.id);
                         
@@ -975,27 +1238,47 @@ export default function AdminView() {
                               )}
                             </td>
                             <td style={{ padding: '12px' }}>
-                              {objUrl ? (
-                                <button
-                                  onClick={() => downloadObjWithFilePicker(objUrl, downloadFilename)}
-                                  style={{
-                                    color: '#007ace',
-                                    textDecoration: 'none',
-                                    fontWeight: '500',
-                                    background: 'none',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                    padding: 0,
-                                    font: 'inherit',
-                                  }}
-                                  onMouseOver={(e) => e.currentTarget.style.textDecoration = 'underline'}
-                                  onMouseOut={(e) => e.currentTarget.style.textDecoration = 'none'}
-                                >
-                                  Download OBJ
-                                </button>
-                              ) : (
-                                <span style={{ color: '#999' }}>No file</span>
-                              )}
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {objUrl ? (
+                                  <button
+                                    onClick={() => downloadObjWithFilePicker(objUrl, downloadFilename)}
+                                    style={{
+                                      color: '#007ace',
+                                      textDecoration: 'none',
+                                      fontWeight: '500',
+                                      background: 'none',
+                                      border: 'none',
+                                      cursor: 'pointer',
+                                      padding: 0,
+                                      font: 'inherit',
+                                      textAlign: 'left',
+                                    }}
+                                    onMouseOver={(e) => (e.currentTarget.style.textDecoration = 'underline')}
+                                    onMouseOut={(e) => (e.currentTarget.style.textDecoration = 'none')}
+                                  >
+                                    Download OBJ
+                                  </button>
+                                ) : (
+                                  <span style={{ color: '#999' }}>No OBJ</span>
+                                )}
+                                {stlUrl ? (
+                                  <a
+                                    href={stlUrl}
+                                    download
+                                    style={{
+                                      color: '#007ace',
+                                      textDecoration: 'none',
+                                      fontWeight: '500',
+                                    }}
+                                    onMouseOver={(e) => (e.currentTarget.style.textDecoration = 'underline')}
+                                    onMouseOut={(e) => (e.currentTarget.style.textDecoration = 'none')}
+                                  >
+                                    Download STL
+                                  </a>
+                                ) : (
+                                  <span style={{ color: '#999' }}>No STL</span>
+                                )}
+                              </div>
                             </td>
                             <td style={{ padding: '12px' }}>
                               {order.shopifyOrderName || order.orderId}
